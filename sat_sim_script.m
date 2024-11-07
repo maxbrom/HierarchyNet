@@ -40,7 +40,7 @@ for step = 1:num_steps
     % Calculate distances to the ground station
     distance_GEO = norm(GEO_position - groundStation_position);
     distance_LEO = norm(LEO_position - groundStation_position);
-    
+    % Test push
     % Calculate round-trip ping times (in milliseconds)
     ping_GEO = 2 * (distance_GEO / c) * 1000; % GEO ping in ms
     ping_LEO = 2 * (distance_LEO / c) * 1000; % LEO ping in ms
