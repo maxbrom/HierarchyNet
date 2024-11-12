@@ -1,5 +1,60 @@
 % Satellite Handover Simulation Script with Ping Measurement
 
+function lon_offset = find_lon_offset(satellite, time_offset)
+    [x, y, z, lat, lon, alt] = satellite_position(satellite, time_offset);
+    lon_offset = rad2deg(lon);
+end
+
+function t_latitude = time_to_latitude(satellite)
+    % Constants
+    R_earth = 6371;  % Radius of the Earth in km
+    mu = 398600.4418; % Standard gravitational parameter for Earth (km^3/s^2)
+
+    % Convert input latitude target to radians
+    lat_target_rad = deg2rad(satellite.latitude);
+
+    % Orbital parameters
+    altitude = satellite.altitude; % Altitude in km
+    inclination = deg2rad(satellite.inclination); % Inclination in radians
+    
+    % Semi-major axis (in km), a = R_earth + h
+    a = R_earth + altitude;  % Semi-major axis (in km)
+    
+    % Orbital period (T) from Kepler's third law (in seconds)
+    T = 2 * pi * sqrt(a^3 / mu); % Orbital period (in seconds)
+    
+    % Calculate the true anomaly theta corresponding to the target latitude
+    % lat(t) = arcsin(sin(i) * sin(theta(t)))
+    % theta(t) = arcsin(sin(lat_target_rad) / sin(i))
+    
+    theta_target = asin(sin(lat_target_rad) / sin(inclination));
+    
+    % Now we know the angle theta_target where the satellite reaches the target latitude
+    
+    % Time to reach this true anomaly (theta_target) can be approximated as:
+    % theta(t) = theta0 + (2 * pi / T) * t
+    % For simplicity, assume the satellite starts at theta = 0 at t = 0 (i.e., at perigee).
+    
+    % Solve for time t when the satellite reaches theta_target
+    t_latitude_seconds = (theta_target / (2 * pi)) * T;
+    
+    t_latitude = t_latitude_seconds;
+end
+
+function [X, Y, Z] = geodetic_to_cartesian(lat, lon, alt)
+    % WGS84 Ellipsoid parameters
+    a = 6378.137;  % semi-major axis in kilometers
+    e = 0.081819190842622;  % eccentricity of the WGS84 ellipsoid
+    
+    % Radius of curvature in the prime vertical (N)
+    N = a / sqrt(1 - e^2 * sin(lat)^2);
+    
+    % Cartesian coordinates (X, Y, Z) in kilometers
+    X = (N + alt) * cos(lat) * cos(lon);  % h is in kilometers
+    Y = (N + alt) * cos(lat) * sin(lon);
+    Z = ((1 - e^2) * N + alt) * sin(lat);  % h is in kilometers
+end
+
 function [latitude, longitude, altitude] = cartesian_to_geodetic(x, y, z)
     % Define the WGS84 ellipsoid constants
     a = 6378.137; % semi-major axis in km
@@ -13,14 +68,12 @@ function [latitude, longitude, altitude] = cartesian_to_geodetic(x, y, z)
     p = sqrt(x^2 + y^2); % distance from z-axis
     theta = atan2(z * a, p * (1 - f)); % initial guess
     
-    % Iterative process to find latitude (using Bowring's method or similar)
+    % Iterative process to find latitude (Bowring/Newton-Raphson method)
     max_iter = 100;
     tolerance = 1e-12;
     for i = 1:max_iter
         sin_theta = sin(theta);
-        cos_theta = cos(theta);
         N = a / sqrt(1 - e2 * sin_theta^2); % radius of curvature in the prime vertical
-        h = p / cos_theta - N; % height (altitude)
         
         % Update the latitude using the current guess
         theta_new = atan2(z + e2 * N * sin_theta, p);
@@ -42,50 +95,46 @@ function [latitude, longitude, altitude] = cartesian_to_geodetic(x, y, z)
     altitude = p / cos(latitude) - N; % in km
 end
 
-function [x, y, z] = satellite_position_with_rotation(satellite, time_offset)
-    altitude = satellite.altitude;
-    latitude = satellite.latitude;
-    longitude = satellite.longitude;
-    inclination = satellite.inclination;
-
+function [x, y, z] = satellite_position_cartesian(satellite, time_offset, lon_offset)
     % Constants
     R_earth = 6371; % Radius of the Earth in km
     mu = 398600.4418; % Standard gravitational parameter for Earth (km^3/s^2)
     
+    if (nargin < 3)
+        longitude = 0;
+    else
+        longitude = deg2rad(satellite.longitude - lon_offset);
+    end
+
     % Orbital Parameters
+    altitude = satellite.altitude;
+    inclination = deg2rad(satellite.inclination);
+    
+    % Orbit radius (in km)
     r_orbit = R_earth + altitude; % Orbit radius in km
     period = 2 * pi * sqrt(r_orbit^3 / mu); % Orbital period in seconds
     
-    % Calculate mean anomaly at t = 0 (assuming initial mean anomaly is 0)
+    % Calculate mean anomaly at time_offset (assume initial mean anomaly is 0)
     mean_anomaly = 2 * pi * (time_offset / period); % Mean anomaly at time_offset
     
-    % Orbital inclination in radians
-    inc = deg2rad(inclination);
-    
-    % Initial latitude and longitude in radians
-    lat = deg2rad(latitude);
-    lon = deg2rad(longitude);
-    
     % Calculate the position in the orbital plane (x', y', z') (ignoring perturbations)
-    true_anomaly = mean_anomaly; % For simplicity, assume mean anomaly ≈ true anomaly in a circular orbit
+    true_anomaly = mean_anomaly; % For simplicity, assume mean anomaly ≈ true anomaly for circular orbit
     
     % Calculate orbital coordinates in the orbital plane
     x_orbit = r_orbit * cos(true_anomaly);
     y_orbit = r_orbit * sin(true_anomaly);
     z_orbit = 0; % For a circular orbit in the equatorial plane
     
-    % Rotate the orbital coordinates by the inclination
+    % Apply the orbital inclination
     x_rot = x_orbit;
-    y_rot = y_orbit * cos(inc) - z_orbit * sin(inc);
-    z_rot = y_orbit * sin(inc) + z_orbit * cos(inc);
+    y_rot = y_orbit * cos(inclination) - z_orbit * sin(inclination);
+    z_rot = y_orbit * sin(inclination) + z_orbit * cos(inclination);
     
-    % Earth’s angular velocity (rad/s) and the rotation angle for the given time
-    omega_earth = 2 * pi / 86164; % Earth’s angular velocity in radians per second
-    rotation_angle = omega_earth * time_offset; % Earth’s rotation angle for the given time
+    % Earth's angular velocity (rad/s) and the rotation angle for the given time
+    omega_earth = 2 * pi / 86164; % Earth’s angular velocity in radians per second (sidereal day)
+    rotation_angle = omega_earth * time_offset; % Earth's rotation angle for the given time
     
-    % Apply the Earth's rotation
-    % Rotate around the z-axis to adjust the longitude and latitude as seen from the Earth
-    % This rotation matrix takes the initial position (longitude = 0, latitude = 0)
+    % Rotate the satellite position by the Earth's rotation
     R_earth_rotation = [cos(rotation_angle), sin(rotation_angle), 0; 
                         -sin(rotation_angle), cos(rotation_angle), 0;
                          0, 0, 1];
@@ -93,16 +142,25 @@ function [x, y, z] = satellite_position_with_rotation(satellite, time_offset)
     % Apply Earth's rotation to the satellite's position
     pos_rotated = R_earth_rotation * [x_rot; y_rot; z_rot];
 
-    % Apply latitude and longitude offset
-    % Latitude and Longitude to Cartesian coordinates (initial position offset)
-    x_offset = (R_earth + altitude) * cos(lat) * cos(lon);
-    y_offset = (R_earth + altitude) * cos(lat) * sin(lon);
-    z_offset = (R_earth + altitude) * sin(lat);
-    
-    % Add the offsets to the rotated position to adjust for initial position
-    x = pos_rotated(1) + x_offset;
-    y = pos_rotated(2) + y_offset;
-    z = pos_rotated(3) + z_offset;
+    % Add the orbital position to the offset to get the final position
+    x = pos_rotated(1);
+    y = pos_rotated(2);
+    z = pos_rotated(3);
+
+    % Offset to desired initial longitude
+    % Initial latitude has to be offset by modifying the time offset strategically
+    [lat, lon, alt] = cartesian_to_geodetic(x, y, z);
+    lon = lon + longitude;
+    [x, y, z] = geodetic_to_cartesian(lat, lon, alt);
+end
+
+function [x, y, z, lat, lon, alt] = satellite_position(satellite, time_offset, lon_offset)
+    if nargin < 3 || isempty(lon_offset)
+        [x, y, z] = satellite_position_cartesian(satellite, time_offset);
+    else
+        [x, y, z] = satellite_position_cartesian(satellite, time_offset, lon_offset);
+    end
+    [lat, lon, alt] = cartesian_to_geodetic(x, y, z);
 end
 
 % Constants
@@ -130,9 +188,10 @@ LEO_trajectory = zeros(num_steps, 3);
 handoverPoints = [];
 pingTimes = []; % Array to store ping times at handover events
 
-LEO_one_positions = zeros(num_steps, 3);
-LEO_one_geodetic_positions = zeros(num_steps, 3);
-LEO_one_satellite = HierarchySatellite(550, 53.2, 0, 90);
+LEO_one_positions = zeros(num_steps, 6);
+LEO_one_satellite = HierarchySatellite(550, 43, 42.737652, -84.483788); % Offset to East Lansing
+LEO_one_time_offset = time_to_latitude(LEO_one_satellite);
+LEO_one_lon_offset = find_lon_offset(LEO_one_satellite, LEO_one_time_offset);
 
 % Simulation Loop: Calculate GEO and LEO Positions
 for step = 1:num_steps
@@ -146,10 +205,8 @@ for step = 1:num_steps
     LEO_position = [LEO_radius * cos(theta_LEO), LEO_radius * sin(theta_LEO), 0];
     LEO_trajectory(step, :) = LEO_position;
 
-    [x, y, z] = satellite_position_with_rotation(LEO_one_satellite, step * dt);
-    LEO_one_positions(step, :) = [x, y, z];
-    [lat, lon, alt] = cartesian_to_geodetic(x, y, z);
-    LEO_one_geodetic_positions(step, :) = [lat, lon, alt];
+    [x, y, z, lat, lon, alt] = satellite_position(LEO_one_satellite, (step - 1) * dt + LEO_one_time_offset, LEO_one_lon_offset);
+    LEO_one_positions(step, :) = [x, y, z, lat, lon, alt];
     
     % Calculate distances to the ground station
     distance_GEO = norm(GEO_position - groundStation_position);
@@ -172,9 +229,9 @@ for step = 1:num_steps
 end
 
 % Extract Latitude, Longitude, and Altitude for Plotting
-GEO_lat = zeros(num_steps, 1);    % Latitude remains 0 for equatorial orbit
-GEO_lon = (0:(num_steps - 1))' * 0.1;  % Simple longitude progression
-GEO_alt = GEO_radius * ones(num_steps, 1); % Constant altitude
+% GEO_lat = zeros(num_steps, 1);    % Latitude remains 0 for equatorial orbit
+% GEO_lon = (0:(num_steps - 1))' * 0.1;  % Simple longitude progression
+% GEO_alt = GEO_radius * ones(num_steps, 1); % Constant altitude
 
 % LEO_lat = zeros(num_steps, 1);    % Latitude remains 0 for equatorial orbit
 % LEO_lon = (0:(num_steps - 1))' * 0.3;  % Simple longitude progression
@@ -194,12 +251,9 @@ titleLabel = uilabel(uif, 'Text', 'Satellite Handover Simulation Between GEO and
 % % Plot LEO Satellite Trajectory on Geoglobe
 % geoplot3(g, LEO_lat, LEO_lon, LEO_alt, 'LineWidth', 2, 'Color', 'green');
 
-LEO_lat = rad2deg(LEO_one_geodetic_positions(:, 1));
-LEO_lon = rad2deg(LEO_one_geodetic_positions(:, 2));
-LEO_alt = LEO_one_geodetic_positions(:, 3);
-
-disp(LEO_one_positions)
-disp([LEO_lat, LEO_lon, LEO_alt])
+LEO_lat = rad2deg(LEO_one_positions(:, 4));
+LEO_lon = rad2deg(LEO_one_positions(:, 5));
+LEO_alt = LEO_one_positions(:, 6);
 
 geoplot3(g, LEO_lat, LEO_lon, LEO_alt, 'LineWidth', 2, 'Color', 'cyan');
 

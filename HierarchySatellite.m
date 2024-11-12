@@ -11,13 +11,13 @@ classdef HierarchySatellite
     
     methods
         % Constructor to initialize the satellite parameters
-        function obj = HierarchySatellite(altitude, inclination, longitude, latitude)
+        function obj = HierarchySatellite(altitude, inclination, latitude, longitude)
             if nargin > 0
                 % Set the initial values for the satellite parameters
                 obj.altitude = altitude;
                 obj.inclination = inclination;
-                obj.longitude = longitude;
                 obj.latitude = latitude;
+                obj.longitude = longitude;
             end
         end
         
