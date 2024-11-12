@@ -1,44 +1,25 @@
 % Satellite Handover Simulation Script with Ping Measurement
 
 function lon_offset = find_lon_offset(satellite, time_offset)
-    [x, y, z, lat, lon, alt] = satellite_position(satellite, time_offset);
+    [x, y, z, lat, lon, alt, satellite] = satellite_position(satellite, time_offset, true);
     lon_offset = rad2deg(lon);
 end
 
-function t_latitude = time_to_latitude(satellite)
+function satellite = set_time_to_latitude(satellite)
     % Constants
     R_earth = 6371;  % Radius of the Earth in km
     mu = 398600.4418; % Standard gravitational parameter for Earth (km^3/s^2)
 
-    % Convert input latitude target to radians
     lat_target_rad = deg2rad(satellite.latitude);
 
-    % Orbital parameters
     altitude = satellite.altitude; % Altitude in km
     inclination = deg2rad(satellite.inclination); % Inclination in radians
-    
-    % Semi-major axis (in km), a = R_earth + h
     a = R_earth + altitude;  % Semi-major axis (in km)
-    
-    % Orbital period (T) from Kepler's third law (in seconds)
     T = 2 * pi * sqrt(a^3 / mu); % Orbital period (in seconds)
-    
-    % Calculate the true anomaly theta corresponding to the target latitude
-    % lat(t) = arcsin(sin(i) * sin(theta(t)))
-    % theta(t) = arcsin(sin(lat_target_rad) / sin(i))
-    
     theta_target = asin(sin(lat_target_rad) / sin(inclination));
     
-    % Now we know the angle theta_target where the satellite reaches the target latitude
-    
-    % Time to reach this true anomaly (theta_target) can be approximated as:
-    % theta(t) = theta0 + (2 * pi / T) * t
-    % For simplicity, assume the satellite starts at theta = 0 at t = 0 (i.e., at perigee).
-    
     % Solve for time t when the satellite reaches theta_target
-    t_latitude_seconds = (theta_target / (2 * pi)) * T;
-    
-    t_latitude = t_latitude_seconds;
+    satellite.time_to_latitude = (theta_target / (2 * pi)) * T;
 end
 
 function [X, Y, Z] = geodetic_to_cartesian(lat, lon, alt)
@@ -50,9 +31,9 @@ function [X, Y, Z] = geodetic_to_cartesian(lat, lon, alt)
     N = a / sqrt(1 - e^2 * sin(lat)^2);
     
     % Cartesian coordinates (X, Y, Z) in kilometers
-    X = (N + alt) * cos(lat) * cos(lon);  % h is in kilometers
+    X = (N + alt) * cos(lat) * cos(lon);
     Y = (N + alt) * cos(lat) * sin(lon);
-    Z = ((1 - e^2) * N + alt) * sin(lat);  % h is in kilometers
+    Z = ((1 - e^2) * N + alt) * sin(lat);
 end
 
 function [latitude, longitude, altitude] = cartesian_to_geodetic(x, y, z)
@@ -95,15 +76,27 @@ function [latitude, longitude, altitude] = cartesian_to_geodetic(x, y, z)
     altitude = p / cos(latitude) - N; % in km
 end
 
-function [x, y, z] = satellite_position_cartesian(satellite, time_offset, lon_offset)
+function [x, y, z, satellite] = satellite_position_cartesian(satellite, time_offset, finding_offset)
     % Constants
     R_earth = 6371; % Radius of the Earth in km
     mu = 398600.4418; % Standard gravitational parameter for Earth (km^3/s^2)
     
-    if (nargin < 3)
+    if isempty(satellite.time_to_latitude)
+        disp("ttl")
+        satellite = set_time_to_latitude(satellite);
+    end
+
+    time_offset = satellite.time_to_latitude + time_offset;
+
+    if isempty(satellite.lon_offset) && ~finding_offset
+        disp("lno")
+        satellite.lon_offset = find_lon_offset(satellite, 0);
+    end
+
+    if finding_offset
         longitude = 0;
     else
-        longitude = deg2rad(satellite.longitude - lon_offset);
+        longitude = deg2rad(satellite.longitude - satellite.lon_offset);
     end
 
     % Orbital Parameters
@@ -154,12 +147,9 @@ function [x, y, z] = satellite_position_cartesian(satellite, time_offset, lon_of
     [x, y, z] = geodetic_to_cartesian(lat, lon, alt);
 end
 
-function [x, y, z, lat, lon, alt] = satellite_position(satellite, time_offset, lon_offset)
-    if nargin < 3 || isempty(lon_offset)
-        [x, y, z] = satellite_position_cartesian(satellite, time_offset);
-    else
-        [x, y, z] = satellite_position_cartesian(satellite, time_offset, lon_offset);
-    end
+function [x, y, z, lat, lon, alt, satellite] = satellite_position(satellite, time_offset, finding_offset)
+    % Pass "false" to the finding_offset parameter when calling this from anywhere except the find_lon_offset function
+    [x, y, z, satellite] = satellite_position_cartesian(satellite, time_offset, finding_offset);
     [lat, lon, alt] = cartesian_to_geodetic(x, y, z);
 end
 
@@ -189,9 +179,7 @@ handoverPoints = [];
 pingTimes = []; % Array to store ping times at handover events
 
 LEO_one_positions = zeros(num_steps, 6);
-LEO_one_satellite = HierarchySatellite(550, 43, 42.737652, -84.483788); % Offset to East Lansing
-LEO_one_time_offset = time_to_latitude(LEO_one_satellite);
-LEO_one_lon_offset = find_lon_offset(LEO_one_satellite, LEO_one_time_offset);
+LEO_one_satellite = HierarchySatellite(550, 43, 42.737652, -84.48378); % Offset to East Lansing
 
 % Simulation Loop: Calculate GEO and LEO Positions
 for step = 1:num_steps
@@ -205,7 +193,7 @@ for step = 1:num_steps
     LEO_position = [LEO_radius * cos(theta_LEO), LEO_radius * sin(theta_LEO), 0];
     LEO_trajectory(step, :) = LEO_position;
 
-    [x, y, z, lat, lon, alt] = satellite_position(LEO_one_satellite, (step - 1) * dt + LEO_one_time_offset, LEO_one_lon_offset);
+    [x, y, z, lat, lon, alt, LEO_one_satellite] = satellite_position(LEO_one_satellite, (step - 1) * dt, false);
     LEO_one_positions(step, :) = [x, y, z, lat, lon, alt];
     
     % Calculate distances to the ground station

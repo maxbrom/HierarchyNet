@@ -7,6 +7,8 @@ classdef HierarchySatellite
         inclination % Orbital inclination in degrees
         longitude % Longitude in degrees
         latitude % Latitude in degrees
+        time_to_latitude % Time when satellite would reach "latitude" parameter if launched from (Equator, Prime Meridian)
+        lon_offset % Amount to offset the longitude after satellite location calculation so that at t=0, the satellite is at "longitude"
     end
     
     methods
