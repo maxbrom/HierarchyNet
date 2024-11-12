@@ -6,6 +6,11 @@ function lon_offset = find_lon_offset(satellite, time_offset)
 end
 
 function satellite = set_time_to_latitude(satellite)
+    if satellite.latitude == 0
+        satellite.time_to_latitude = 0;
+        return;
+    end
+
     % Constants
     R_earth = 6371;  % Radius of the Earth in km
     mu = 398600.4418; % Standard gravitational parameter for Earth (km^3/s^2)
@@ -82,14 +87,12 @@ function [x, y, z, satellite] = satellite_position_cartesian(satellite, time_off
     mu = 398600.4418; % Standard gravitational parameter for Earth (km^3/s^2)
     
     if isempty(satellite.time_to_latitude)
-        disp("ttl")
         satellite = set_time_to_latitude(satellite);
     end
 
     time_offset = satellite.time_to_latitude + time_offset;
 
     if isempty(satellite.lon_offset) && ~finding_offset
-        disp("lno")
         satellite.lon_offset = find_lon_offset(satellite, 0);
     end
 
@@ -178,6 +181,9 @@ LEO_trajectory = zeros(num_steps, 3);
 handoverPoints = [];
 pingTimes = []; % Array to store ping times at handover events
 
+GEO_one_positions = zeros(num_steps, 6);
+GEO_one_satellite = HierarchySatellite(GEO_altitude, 0, 0, -90);
+
 LEO_one_positions = zeros(num_steps, 6);
 LEO_one_satellite = HierarchySatellite(550, 43, 42.737652, -84.48378); % Offset to East Lansing
 
@@ -195,6 +201,9 @@ for step = 1:num_steps
 
     [x, y, z, lat, lon, alt, LEO_one_satellite] = satellite_position(LEO_one_satellite, (step - 1) * dt, false);
     LEO_one_positions(step, :) = [x, y, z, lat, lon, alt];
+
+    [x, y, z, lat, lon, alt, GEO_one_satellite] = satellite_position(GEO_one_satellite, (step - 1) * dt, false);
+    GEO_one_positions(step, :) = [x, y, z, lat, lon, alt];
     
     % Calculate distances to the ground station
     distance_GEO = norm(GEO_position - groundStation_position);
@@ -243,7 +252,12 @@ LEO_lat = rad2deg(LEO_one_positions(:, 4));
 LEO_lon = rad2deg(LEO_one_positions(:, 5));
 LEO_alt = LEO_one_positions(:, 6);
 
+GEO_lat = rad2deg(GEO_one_positions(:, 4));
+GEO_lon = rad2deg(GEO_one_positions(:, 5));
+GEO_alt = GEO_one_positions(:, 6);
+
 geoplot3(g, LEO_lat, LEO_lon, LEO_alt, 'LineWidth', 2, 'Color', 'cyan');
+geoplot3(g, GEO_lat, GEO_lon, GEO_alt, 'LineWidth', 2, 'Color', 'red');
 
 % Plot Handover Points on Geoglobe
 if ~isempty(handoverPoints)
