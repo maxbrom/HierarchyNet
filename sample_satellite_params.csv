@@ -1,0 +1,6 @@
+name,initial_altitude,inclination,initial_latitude,initial_longitude,sat_type
+G1,35786,0,0,0,GEO
+G2,35786,0,0,-90,GEO
+EastLansing1,550,53.2,42.737652,-84.48378,LEO
+AnnArbor1,550,53.2,42.279594,-83.732124,LEO
+TraverseCity1,550,53.2,44.7631,-85.6206,LEO
