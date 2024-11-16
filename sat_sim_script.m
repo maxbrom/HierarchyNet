@@ -138,6 +138,10 @@ function write_sat_array_to_csv(arr, filename)
     writetable(sat_table, filename);
 end
 
+% Initialize the current LEO index
+currentLEO_index = 1; % Start with the first LEO satellite
+predictedHandoverPoints = []; % To store handover points for visualization
+
 % Constants
 mu = 398600.4418; % Earth's gravitational parameter (km^3/s^2)
 R_earth = 6371; % Earth's radius in km
@@ -191,18 +195,31 @@ geo_positions = zeros(num_steps, size(geo_satellites, 2), 6);
 
 % Simulation Loop: Calculate GEO and LEO Positions
 for step = 1:num_steps
+    % Calculate GEO satellite positions
     for i = 1:size(geo_satellites, 2)
         [x, y, z, lat, lon, alt, geo_satellites(i)] = satellite_position(geo_satellites(i), (step - 1) * dt, false);
         geo_position = [x, y, z];
         geo_positions(step, i, :) = [x, y, z, lat, lon, alt];
     end
 
+    % Calculate LEO satellite positions
     for i = 1:size(leo_satellites, 2)
         [x, y, z, lat, lon, alt, leo_satellites(i)] = satellite_position(leo_satellites(i), (step - 1) * dt, false);
         leo_position = [x, y, z];
         leo_positions(step, i, :) = [x, y, z, lat, lon, alt];
     end
+
+    % Handover process: Determine the next LEO satellite
+    [currentLEO_index, nextLEO_position, predictedHandoverPoints, ping_LEO] = ...
+        handoverProcess(geo_position, squeeze(leo_positions(step, :, 1:3)), groundStation_position, currentLEO_index, c);
+
+    % Optional: Log or display handover events for debugging
+    if ~isempty(nextLEO_position)
+        disp(['Handover to LEO ' num2str(currentLEO_index) ' at step ' num2str(step) ...
+              ' with ping: ' num2str(ping_LEO) ' ms']);
+    end
 end
+
 
 % Create a 3D Globe inside a uifigure
 uif = uifigure;           % Create a UI figure for the globe
@@ -226,6 +243,14 @@ for i = 1:size(geo_positions, 2)
     lon = rad2deg(geo_positions(:, i, 5));
     alt = geo_positions(:, i, 6);
     geoplot3(g, lat, lon, alt, 'LineWidth', 2, 'Color', colors(i,:));
+end
+
+% Plot the predicted handover points on the geoglobe
+if ~isempty(predictedHandoverPoints)
+    handover_lats = rad2deg(predictedHandoverPoints(:, 2));
+    handover_lons = rad2deg(predictedHandoverPoints(:, 3));
+    handover_alts = predictedHandoverPoints(:, 4);
+    geoplot3(g, handover_lats, handover_lons, handover_alts, 'Marker', 'o', 'MarkerSize', 5, 'Color', 'green');
 end
 
 
