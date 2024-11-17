@@ -1,11 +1,22 @@
 % Satellite Handover Simulation Script with Ping Measurement
 
 function lon_offset = find_lon_offset(satellite, time_offset)
+    % Calculate longitude offset to make it such that a satellite will be at the longitude at the given time offset
+    % Input:
+    %   - satellite: HierarchySatellite object to calculate the lon_offset for
+    %   - time_offset: The time offset for which to find the lon_offset
+    % Output:
+    %   - lon_offset: How many degrees to offset longitude by so that the satellite is at the desired satellite.longitude parameter at time_offset
     [x, y, z, lat, lon, alt, satellite] = satellite_position(satellite, time_offset, true);
     lon_offset = rad2deg(lon);
 end
 
 function satellite = set_time_to_latitude(satellite)
+    % Set the time_to_latitude parameter in the given satellite such the satellite is at the satellite.latitude parameter at that time
+    % Input:
+    %   - satellite: HierarchySatellite object to calculate the time_to_latitude parameter for
+    % Output:
+    %   - satellite: The updated HierarchySatellite object
     if satellite.latitude == 0
         satellite.time_to_latitude = 0;
         return;
@@ -26,6 +37,8 @@ function satellite = set_time_to_latitude(satellite)
 end
 
 function [X, Y, Z] = geodetic_to_cartesian(lat, lon, alt)
+    % Convert geodetic coordinates to cartesian coordinates
+    % Geodetic coordinates must be given in radians
     R_earth = 6371;
     r_orbit = R_earth + alt;
     
@@ -35,6 +48,8 @@ function [X, Y, Z] = geodetic_to_cartesian(lat, lon, alt)
 end
 
 function [latitude, longitude, altitude] = cartesian_to_geodetic(x, y, z)
+    % Convert cartesian coordiantes to geodetic coordinates
+    % Geodetic coordinates are given in radians
     R_earth = 6371;
 
     p = sqrt(x^2 + y^2);  % distance from z-axis
@@ -44,6 +59,18 @@ function [latitude, longitude, altitude] = cartesian_to_geodetic(x, y, z)
 end
 
 function [x, y, z, satellite] = satellite_position_cartesian(satellite, time_offset, finding_offset)
+    % Calculate the satellite position in cartesian coordinates. 
+    % If finding_offset is true, this function calculates the position without regard to the satellite.longitude or satellite.lon_offset parameters
+    % Input:
+    %   - satellite: Hierarchy satellite object to calculate the cartesian coordinates for
+    %   - time_offset: The time_offset from the beginning of the orbit at which to calculate the position
+    %   - finding_offset: Boolean to determine whether we are need to find the satellite.lon_offset parameter (this is done to avoid infinite recursion)
+    % Output:
+    %   - x: The cartesian x-coordinate in kilometers at the given time offset
+    %   - y: The cartesian y-coordinate in kilometers at the given time offset
+    %   - z: The cartesian z-coordinate in kilometers at the given time offset
+    %   - satellite: The updated satellite with the time_to_latitude and lon_offset parameters set if not previously set (will only be modified on first call to this function)
+
     R_earth = 6371; % For spherical earth
     mu = 398600.4418;
     
@@ -99,18 +126,26 @@ function [x, y, z, satellite] = satellite_position_cartesian(satellite, time_off
 end
 
 function [x, y, z, lat, lon, alt, satellite] = satellite_position(satellite, time_offset, finding_offset)
+    % Calculate the position of the given HierarchySatellite in cartesian and geodetic coordinates
+    % If finding_offset is true, this function calculates the position without regard to the satellite.longitude or satellite.lon_offset parameters
     % Pass "false" to the finding_offset parameter when calling this from anywhere except the find_lon_offset function
     [x, y, z, satellite] = satellite_position_cartesian(satellite, time_offset, finding_offset);
     [lat, lon, alt] = cartesian_to_geodetic(x, y, z);
 end
 
 function [shell] = generate_even_spaced_shell(original_satellite, satellite_count, dt)
-    % Note: spacing indicates the time difference in the orbital plane
+    % Generate a shell of satellites based off of the configuration of a single satellite
+    % Input:
+    %   - original_satellite: The satellite to base the shell off
+    %   - satellite_count: The number of satellites in the shell
+    %   - dt: The number of seconds between the times two adjacent satellites will pass over the same location in the orbital plane
+    % Output:
+    %   - shell: An array of HierarchySatellites that corresponds to the desired parameters (includes the original satellite as well)
     shell(satellite_count) = HierarchySatellite;
     for i = 1:satellite_count
         [x, y, z, lat, lon, alt, other_satellite] = satellite_position(original_satellite, (i - 1) * dt, false);
-        other_satellite.latitude = lat;
-        other_satellite.longitude = lon;
+        other_satellite.latitude = rad2deg(lat);
+        other_satellite.longitude = rad2deg(lon);
         other_satellite.altitude = alt;
         other_satellite.time_to_latitude = nan;
         other_satellite.lon_offset = nan;
@@ -119,6 +154,10 @@ function [shell] = generate_even_spaced_shell(original_satellite, satellite_coun
 end
 
 function write_sat_array_to_csv(arr, filename)
+    % Write parameters for an array of HierarchySatellite objects to csv file that can be loaded for a later run of this script
+    % Input:
+    %   - arr: The array of HierarchySatellite objects
+    %   - filename: The name of the file to save the satellite information to
     cnt = size(arr, 2);
     name = strings(10, 1);
     initial_altitude = zeros(cnt, 1);
@@ -149,14 +188,15 @@ c = 299792.458; % Speed of light in km/s
 GEO_altitude = 35786; % Altitude of geosynchronous satellites in km
 
 % Ground Station Position (Example at Equator)
-groundStation_position = [R_earth, 0, 0]; % on Earth's surface at equator
+[x, y, z] = geodetic_to_cartesian(0.261, deg2rad(42.737652), deg2rad(-84.483788));
+groundStation_position = [x, y, z]; % on Earth's surface at equator
 
 % Simulation Settings
 dt = 10; % Time step in seconds
 simulation_duration = 86000;
 num_steps = simulation_duration / dt;
 
-T = readtable("sample_satellite_params.csv", 'NumHeaderLines', 1);
+T = readtable("multiple_shells_params.csv", 'NumHeaderLines', 1);
 G = findgroups(T{:, 6});
 T_split = splitapply( @(varargin) varargin, T , G);
 subTables = cell(size(T_split, 1));
@@ -189,6 +229,17 @@ for i = 1:height(geo_satellite_params)
     params = geo_satellite_params(i, :);
     geo_satellites(i) = HierarchySatellite(params(1), params(2), params(3), params(4));
 end
+
+% % This is how to generate multiple shells of satellites based on a few initial satellites.
+% % You may need to customize some parameters if different shells need different spacings or numbers of satellites
+% sat_cnt_per_shell = 17;
+% generated_sats(sat_cnt_per_shell * size(leo_satellites, 1)) = HierarchySatellite;
+% for i = 1:size(leo_satellites, 2)
+%     shell = generate_even_spaced_shell(leo_satellites(i), sat_cnt_per_shell, 337);
+%     generated_sats((i - 1) * sat_cnt_per_shell + 1 : i * sat_cnt_per_shell) = shell(1:sat_cnt_per_shell);
+% end
+% generated_sats(end + 1) = geo_satellites(1);
+% write_sat_array_to_csv(generated_sats, "multiple_shells_params.csv");
 
 leo_positions = zeros(num_steps, size(leo_satellites, 2), 6);
 geo_positions = zeros(num_steps, size(geo_satellites, 2), 6);
@@ -245,6 +296,10 @@ for i = 1:size(geo_positions, 2)
     geoplot3(g, lat, lon, alt, 'LineWidth', 2, 'Color', colors(i,:));
 end
 
+% % This is how to save the locations to a csv file
+% writematrix(leo_positions, 'sample_satellite_location_output.csv')
+% writematrix(geo_positions, 'sample_satellite_location_output.csv', 'WriteMode', 'append');
+
 % Plot the predicted handover points on the geoglobe
 if ~isempty(predictedHandoverPoints)
     handover_lats = rad2deg(predictedHandoverPoints(:, 2));
@@ -252,11 +307,6 @@ if ~isempty(predictedHandoverPoints)
     handover_alts = predictedHandoverPoints(:, 4);
     geoplot3(g, handover_lats, handover_lons, handover_alts, 'Marker', 'o', 'MarkerSize', 5, 'Color', 'green');
 end
-
-
-% % This is how to save the locations to a csv file
-% writematrix(leo_positions, 'sample_satellite_location_output.csv')
-% writematrix(geo_positions, 'sample_satellite_location_output.csv', 'WriteMode', 'append');
 
 % % This is how to generate a dummy shell with evenly spaced satellites
 % dummy = leo_satellites(i);
