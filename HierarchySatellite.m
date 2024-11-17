@@ -1,8 +1,8 @@
 classdef HierarchySatellite
-    % Satellite class to represent a satellite's orbital parameters
+    % Satellite class to represent a satellites orbital parameters
     
     properties
-        % Define properties for the satellite's parameters
+        % Define properties for the satellites parameters
         altitude % Altitude in km
         inclination % Orbital inclination in degrees
         longitude % Longitude in degrees

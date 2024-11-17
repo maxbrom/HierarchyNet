@@ -13,7 +13,7 @@ function [currentLEO_index, nextLEO_position, predictedHandoverPoints, ping_LEO]
     %
     % Outputs:
     %   currentLEO_index - Updated index of the current LEO satellite
-    %   nextLEO_position - 1x3 vector of the next LEO satellite's position
+    %   nextLEO_position - 1x3 vector of the next LEO satellites position
     %   predictedHandoverPoints - Updated matrix of predicted handover points
     %   ping_LEO - Ping time to the next LEO satellite in milliseconds
 
