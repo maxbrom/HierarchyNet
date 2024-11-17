@@ -128,7 +128,7 @@ function transmit_graph(G)
         % Example: send_data_via_leo_network(graph_data);
         
     catch exception
-        warning('Graph transmission failed: %s', exception.message);
+        warning(exception.identifier, '%s', exception.message);
     end
 end
 
@@ -201,6 +201,6 @@ function ExecuteHandover(bestLEO)
         % Example: initiate_handover_sequence(bestLEO);
         
     catch exception
-        warning('Handover failed: %s', exception.message);
+        warning(exception.identifier, '%s', exception.message);
     end
 end
