@@ -190,7 +190,7 @@ function write_sat_array_to_csv(arr, filename)
 end
 
 % Initialize the current LEO index
-currentLEO_index = 1; % Start with the first LEO satellite
+currentLEO_index = 0; % Start with the first LEO satellite
 predictedHandoverPoints = []; % To store handover points for visualization
 
 % Constants
@@ -200,15 +200,15 @@ c = 299792.458; % Speed of light in km/s
 GEO_altitude = 35786; % Altitude of geosynchronous satellites in km
 
 % Ground Station Position (Example at Equator)
-[x, y, z] = geodetic_to_cartesian(0.261, deg2rad(42.737652), deg2rad(-84.483788));
-groundStation_position = [x, y, z]; % on Earth's surface at equator
+[x, y, z] = geodetic_to_cartesian(deg2rad(42.737652), deg2rad(-84.483788), 0.261);
+user_position = [x, y, z]; % on Earth's surface at equator
 
 % Simulation Settings
 dt = 10; % Time step in seconds
 simulation_duration = 1000;
 num_steps = simulation_duration / dt;
 
-T = readtable("multiple_shells_params.csv", 'NumHeaderLines', 1);
+T = readtable("multiple_shells_params_doubled.csv", 'NumHeaderLines', 1);
 G = findgroups(T{:, 6});
 T_split = splitapply( @(varargin) varargin, T , G);
 subTables = cell(size(T_split, 1));
@@ -246,12 +246,15 @@ end
 % % You may need to customize some parameters if different shells need different spacings or numbers of satellites
 % sat_cnt_per_shell = 17;
 % generated_sats(sat_cnt_per_shell * size(leo_satellites, 1)) = HierarchySatellite;
+% size(leo_satellites, 2)
 % for i = 1:size(leo_satellites, 2)
 %     shell = generate_even_spaced_shell(leo_satellites(i), sat_cnt_per_shell, 337);
 %     generated_sats((i - 1) * sat_cnt_per_shell + 1 : i * sat_cnt_per_shell) = shell(1:sat_cnt_per_shell);
 % end
 % generated_sats(end + 1) = geo_satellites(1);
-% write_sat_array_to_csv(generated_sats, "multiple_shells_params.csv");
+% write_sat_array_to_csv(generated_sats, "multiple_shells_params_doubled.csv");
+
+% disp("written")
 
 leo_positions = zeros(num_steps, size(leo_satellites, 2), 6);
 geo_positions = zeros(num_steps, size(geo_satellites, 2), 6);
@@ -264,16 +267,16 @@ leo_connection_history = zeros(num_steps, 1);
 
 % Before the simulation loop, create the UI elements
 % Create a 3D Globe inside a uifigure
-uif = uifigure;           % Create a UI figure for the globe
-g = geoglobe(uif, 'NextPlot', 'add');        % Create the geoglobe within the UI figure
+% uif = uifigure;           % Create a UI figure for the globe
+% g = geoglobe(uif, 'NextPlot', 'add');        % Create the geoglobe within the UI figure
 
-% Add a title to the UI figure using a uilabel
-titleLabel = uilabel(uif, 'Text', 'Satellite Handover Simulation Between GEO and LEO Satellites', ...
-    'Position', [10, uif.Position(4) - 30, 400, 30], 'FontSize', 14, 'FontWeight', 'bold');
+% % Add a title to the UI figure using a uilabel
+% titleLabel = uilabel(uif, 'Text', 'Satellite Handover Simulation Between GEO and LEO Satellites', ...
+%     'Position', [10, uif.Position(4) - 30, 400, 30], 'FontSize', 14, 'FontWeight', 'bold');
 
-% Add a ping display label to the UI figure
-pingLabel = uilabel(uif, 'Text', 'Current Ping: N/A', ...
-    'Position', [10, uif.Position(4) - 60, 400, 30], 'FontSize', 12);
+% % Add a ping display label to the UI figure
+% pingLabel = uilabel(uif, 'Text', 'Current Ping: N/A', ...
+%     'Position', [10, uif.Position(4) - 60, 400, 30], 'FontSize', 12);
 
 % Simulation Loop: Calculate GEO and LEO Positions
 for step = 1:num_steps
@@ -302,7 +305,7 @@ for step = 1:num_steps
 
     % Handover process: Determine the next LEO satellite
     [currentLEO_index, nextLEO_position, predictedHandoverPoints, ping_LEO] = ...
-        handoverProcess(squeeze(geo_positions(step, 1, 1:3)), squeeze(leo_positions(step, :, 1:3)), groundStation_position, currentLEO_index, c);
+        handoverProcess(squeeze(geo_positions(step, 1, 1:3)), squeeze(leo_positions(step, :, 1:3)), squeeze(leo_velocities(step, :, :)), user_position, currentLEO_index, c);
 
     % Display timestamp and ping information
     if isempty(ping_LEO)
@@ -339,33 +342,33 @@ end
 % Save and plot the data
 save_and_plot_ping_data(time_history, ping_history, leo_connection_history, dt);
 
-colors = hsv(size(leo_positions, 2));
-for i = 1:size(leo_positions, 2)
-    lat = rad2deg(leo_positions(:, i, 4));
-    lon = rad2deg(leo_positions(:, i, 5));
-    alt = leo_positions(:, i, 6);
-    geoplot3(g, lat, lon, alt, 'LineWidth', 2, 'Color', colors(i,:));
-end
+% colors = hsv(size(leo_positions, 2));
+% for i = 1:size(leo_positions, 2)
+%     lat = rad2deg(leo_positions(:, i, 4));
+%     lon = rad2deg(leo_positions(:, i, 5));
+%     alt = leo_positions(:, i, 6);
+%     geoplot3(g, lat, lon, alt, 'LineWidth', 2, 'Color', colors(i,:));
+% end
 
-colors = hsv(size(geo_positions,2));
-for i = 1:size(geo_positions, 2)
-    lat = rad2deg(geo_positions(:, i, 4));
-    lon = rad2deg(geo_positions(:, i, 5));
-    alt = geo_positions(:, i, 6);
-    geoplot3(g, lat, lon, alt, 'LineWidth', 2, 'Color', colors(i,:));
-end
+% colors = hsv(size(geo_positions,2));
+% for i = 1:size(geo_positions, 2)
+%     lat = rad2deg(geo_positions(:, i, 4));
+%     lon = rad2deg(geo_positions(:, i, 5));
+%     alt = geo_positions(:, i, 6);
+%     geoplot3(g, lat, lon, alt, 'LineWidth', 2, 'Color', colors(i,:));
+% end
 
 % % This is how to save the locations to a csv file
 % writematrix(leo_positions, 'sample_satellite_location_output.csv')
 % writematrix(geo_positions, 'sample_satellite_location_output.csv', 'WriteMode', 'append');
 
 % Plot the predicted handover points on the geoglobe
-if ~isempty(predictedHandoverPoints)
-    handover_lats = rad2deg(predictedHandoverPoints(:, 2));
-    handover_lons = rad2deg(predictedHandoverPoints(:, 3));
-    handover_alts = predictedHandoverPoints(:, 4);
-    geoplot3(g, handover_lats, handover_lons, handover_alts, 'Marker', 'o', 'MarkerSize', 5, 'Color', 'green');
-end
+% if ~isempty(predictedHandoverPoints)
+%     handover_lats = rad2deg(predictedHandoverPoints(:, 2));
+%     handover_lons = rad2deg(predictedHandoverPoints(:, 3));
+%     handover_alts = predictedHandoverPoints(:, 4);
+%     geoplot3(g, handover_lats, handover_lons, handover_alts, 'Marker', 'o', 'MarkerSize', 5, 'Color', 'green');
+% end
 
 % % This is how to generate a dummy shell with evenly spaced satellites
 % dummy = leo_satellites(i);

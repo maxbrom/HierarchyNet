@@ -39,6 +39,7 @@ function save_and_plot_ping_data(time_history, ping_history, leo_connection_hist
     grid on;
     xlabel('Time (seconds)');
     ylabel('Ping (ms)');
+    yscale('log');
     title('Satellite Connection Ping History');
     legend('show', 'Location', 'eastoutside');
     
