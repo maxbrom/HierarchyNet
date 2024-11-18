@@ -205,7 +205,7 @@ groundStation_position = [x, y, z]; % on Earth's surface at equator
 
 % Simulation Settings
 dt = 10; % Time step in seconds
-simulation_duration = 86000;
+simulation_duration = 1000;
 num_steps = simulation_duration / dt;
 
 T = readtable("multiple_shells_params.csv", 'NumHeaderLines', 1);
@@ -257,8 +257,29 @@ leo_positions = zeros(num_steps, size(leo_satellites, 2), 6);
 geo_positions = zeros(num_steps, size(geo_satellites, 2), 6);
 leo_velocities = zeros(num_steps, size(leo_satellites, 2), 3);
 
+% Initialize arrays to store data
+ping_history = zeros(num_steps, 1);
+time_history = zeros(num_steps, 1);
+leo_connection_history = zeros(num_steps, 1);
+
+% Before the simulation loop, create the UI elements
+% Create a 3D Globe inside a uifigure
+uif = uifigure;           % Create a UI figure for the globe
+g = geoglobe(uif, 'NextPlot', 'add');        % Create the geoglobe within the UI figure
+
+% Add a title to the UI figure using a uilabel
+titleLabel = uilabel(uif, 'Text', 'Satellite Handover Simulation Between GEO and LEO Satellites', ...
+    'Position', [10, uif.Position(4) - 30, 400, 30], 'FontSize', 14, 'FontWeight', 'bold');
+
+% Add a ping display label to the UI figure
+pingLabel = uilabel(uif, 'Text', 'Current Ping: N/A', ...
+    'Position', [10, uif.Position(4) - 60, 400, 30], 'FontSize', 12);
+
 % Simulation Loop: Calculate GEO and LEO Positions
 for step = 1:num_steps
+    % Calculate current simulation time
+    current_time = (step - 1) * dt;  % Time in seconds
+
     % Calculate GEO satellite positions
     for i = 1:size(geo_satellites, 2)
         [x, y, z, lat, lon, alt, geo_satellites(i)] = satellite_position(geo_satellites(i), (step - 1) * dt, false);
@@ -283,21 +304,40 @@ for step = 1:num_steps
     [currentLEO_index, nextLEO_position, predictedHandoverPoints, ping_LEO] = ...
         handoverProcess(squeeze(geo_positions(step, 1, 1:3)), squeeze(leo_positions(step, :, 1:3)), groundStation_position, currentLEO_index, c);
 
-    % Optional: Log or display handover events for debugging
-    if ~isempty(nextLEO_position)
-        disp(['Handover to LEO ' num2str(currentLEO_index) ' at step ' num2str(step) ...
-              ' with ping: ' num2str(ping_LEO) ' ms']);
+    % Display timestamp and ping information
+    if isempty(ping_LEO)
+        ping_LEO = inf;
     end
+    
+    % Format time as HH:MM:SS
+    hours = floor(current_time / 3600);
+    minutes = floor((current_time - hours * 3600) / 60);
+    seconds = current_time - hours * 3600 - minutes * 60;
+    timestr = sprintf('%02d:%02d:%02d', hours, minutes, floor(seconds));
+    
+    if ping_LEO == inf
+        disp(['Time: ' timestr ' (Step ' num2str(step) ') - No LEO coverage. Ping: inf ms']);
+    else
+        disp(['Time: ' timestr ' (Step ' num2str(step) ') - Connected to LEO ' num2str(currentLEO_index) ' with ping: ' num2str(ping_LEO) ' ms']);
+    end
+
+    % Update ping display in UI if it exists
+    if exist('pingLabel', 'var') && isvalid(pingLabel)  % Check if pingLabel exists and is valid
+        if ping_LEO == inf
+            pingLabel.Text = sprintf('Time: %s - No LEO coverage. Ping: inf ms', timestr);
+        else
+            pingLabel.Text = sprintf('Time: %s - Connected to LEO %d, Ping: %.2f ms', timestr, currentLEO_index, ping_LEO);
+        end
+    end
+
+    % Store data for this timestep
+    ping_history(step) = ping_LEO;
+    time_history(step) = current_time;
+    leo_connection_history(step) = currentLEO_index;
 end
 
-
-% Create a 3D Globe inside a uifigure
-uif = uifigure;           % Create a UI figure for the globe
-g = geoglobe(uif, 'NextPlot', 'add');        % Create the geoglobe within the UI figure
-
-% Add a title to the UI figure using a uilabel
-titleLabel = uilabel(uif, 'Text', 'Satellite Handover Simulation Between GEO and LEO Satellites', ...
-    'Position', [10, uif.Position(4) - 30, 400, 30], 'FontSize', 14, 'FontWeight', 'bold');
+% Save and plot the data
+save_and_plot_ping_data(time_history, ping_history, leo_connection_history, dt);
 
 colors = hsv(size(leo_positions, 2));
 for i = 1:size(leo_positions, 2)

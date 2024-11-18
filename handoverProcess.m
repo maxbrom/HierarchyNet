@@ -23,6 +23,13 @@ function [currentLEO_index, nextLEO_position, predictedHandoverPoints, ping_LEO]
     predictedHandoverPoints = [];
     ping_LEO = [];
 
+    % Check if we have LEO coverage
+    if bestLEO == 0
+        disp('Warning: Ground station is currently out of coverage from any LEO satellite');
+        currentLEO_index = 0;
+        return;
+    end
+
     % Check if a handover is needed
     if bestLEO ~= currentLEO_index
         % Update the next LEO position
@@ -133,7 +140,45 @@ end
 
 % User decision making function
 function bestLEO = UserDecisionMaking(G, user_position, currentLEO)
-    % Get neighboring LEOs from graph using successors
+    % If there's no current connection (currentLEO = 0), search for initial connection
+    if currentLEO == 0
+        all_leos = 1:height(G.Nodes);
+        bestLEO = findBestAvailableLEO(G, user_position, all_leos);
+        return;
+    end
+
+    % Rest of the function for when we have a current connection
+    current_leo_data = G.Nodes(currentLEO, :);
+    current_position = current_leo_data.Position{1};
+    current_coverage_radius = current_leo_data.CoverageRadius(1);
+    
+    % Calculate distance to current LEO
+    distance_to_current = norm(current_position - user_position);
+    
+    % Check if user is outside current LEO's coverage
+    if distance_to_current > current_coverage_radius
+        % User is outside coverage, search for any LEO that provides coverage
+        all_leos = 1:height(G.Nodes);
+        bestLEO = findBestAvailableLEO(G, user_position, all_leos);
+        
+        if bestLEO == 0  % No LEO provides coverage
+            warning('User is currently out of coverage from any LEO satellite');
+            bestLEO = 0;  % Return 0 to indicate no coverage
+            return;
+        end
+        
+        return;
+    end
+    
+    % Rest of the existing handover logic for when user is within coverage
+    handover_threshold = 0.8 * current_coverage_radius;
+    
+    if distance_to_current < handover_threshold
+        bestLEO = currentLEO;  % Stay with current LEO
+        return;
+    end
+    
+    % If we're here, user is near edge of coverage, so consider handover
     handoverCandidates = successors(G, currentLEO);
     
     % If no candidates available, stay with current LEO
@@ -143,24 +188,40 @@ function bestLEO = UserDecisionMaking(G, user_position, currentLEO)
     end
     
     % Initialize best LEO search
-    bestLEO = currentLEO;  % Default to current LEO
-    max_score = calculate_handover_score(G, currentLEO, user_position);  % Calculate current LEO's score
+    bestLEO = currentLEO;
+    max_score = calculate_handover_score(G, currentLEO, user_position);
     
     % Evaluate each candidate
     for i = 1:length(handoverCandidates)
         candidate = handoverCandidates(i);
-        score = calculate_handover_score(G, candidate, user_position);
+        candidate_data = G.Nodes(candidate, :);
+        candidate_position = candidate_data.Position{1};
         
-        % Only change if the candidate is significantly better (add threshold)
-        if score > max_score * 1.1  % 10% improvement threshold
-            max_score = score;
-            bestLEO = candidate;
+        % Calculate distance to candidate
+        distance_to_candidate = norm(candidate_position - user_position);
+        
+        % Only consider candidates that provide good coverage
+        if distance_to_candidate < 0.7 * candidate_data.CoverageRadius(1)  % Ensure we're well within new coverage
+            score = calculate_handover_score(G, candidate, user_position);
+            
+            % Only change if the candidate is significantly better
+            if score > max_score * 1.1  % 10% improvement threshold
+                max_score = score;
+                bestLEO = candidate;
+            end
         end
     end
     
-    % Execute handover if a better LEO was found
-    if bestLEO ~= currentLEO
-        ExecuteHandover(bestLEO);
+    % If we're about to leave coverage and no good candidate found, pick the best available
+    if bestLEO == currentLEO && distance_to_current > 0.95 * current_coverage_radius
+        for i = 1:length(handoverCandidates)
+            candidate = handoverCandidates(i);
+            score = calculate_handover_score(G, candidate, user_position);
+            if score > max_score
+                max_score = score;
+                bestLEO = candidate;
+            end
+        end
     end
 end
 
@@ -266,5 +327,27 @@ function ExecuteHandover(bestLEO)
         
     catch exception
         warning(exception.identifier, '%s', exception.message);
+    end
+end
+
+% New helper function to find the best available LEO
+function bestLEO = findBestAvailableLEO(G, user_position, candidates)
+    bestLEO = 0;
+    best_score = -inf;
+    
+    for i = candidates
+        leo_data = G.Nodes(i, :);
+        leo_position = leo_data.Position{1};
+        coverage_radius = leo_data.CoverageRadius(1);
+        
+        % Check if user is within this LEO's coverage
+        distance = norm(leo_position - user_position);
+        if distance <= coverage_radius
+            score = calculate_handover_score(G, i, user_position);
+            if score > best_score
+                best_score = score;
+                bestLEO = i;
+            end
+        end
     end
 end
