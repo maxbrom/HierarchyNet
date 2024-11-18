@@ -11,6 +11,18 @@ function lon_offset = find_lon_offset(satellite, time_offset)
     lon_offset = rad2deg(lon);
 end
 
+function [vx, vy, vz] = calculate_velocity(satellite, time)
+    % Calculate velocity using central difference method
+    dt = 0.1;  % Time step for velocity calculation
+    [x1, y1, z1, ~] = satellite_position_cartesian(satellite, time - dt, false);
+    [x2, y2, z2, ~] = satellite_position_cartesian(satellite, time + dt, false);
+    
+    % Calculate velocity components
+    vx = (x2 - x1) / (2 * dt);
+    vy = (y2 - y1) / (2 * dt);
+    vz = (z2 - z1) / (2 * dt);
+end
+
 function satellite = set_time_to_latitude(satellite)
     % Set the time_to_latitude parameter in the given satellite such the satellite is at the satellite.latitude parameter at that time
     % Input:
@@ -243,6 +255,7 @@ end
 
 leo_positions = zeros(num_steps, size(leo_satellites, 2), 6);
 geo_positions = zeros(num_steps, size(geo_satellites, 2), 6);
+leo_velocities = zeros(num_steps, size(leo_satellites, 2), 3);
 
 % Simulation Loop: Calculate GEO and LEO Positions
 for step = 1:num_steps
@@ -260,9 +273,15 @@ for step = 1:num_steps
         leo_positions(step, i, :) = [x, y, z, lat, lon, alt];
     end
 
+    % Calculate LEO satellite velocities
+    for i = 1:size(leo_satellites, 2)
+        [vx, vy, vz] = calculate_velocity(leo_satellites(i), (step - 1) * dt);
+        leo_velocities(step, i, :) = [vx, vy, vz];
+    end
+
     % Handover process: Determine the next LEO satellite
     [currentLEO_index, nextLEO_position, predictedHandoverPoints, ping_LEO] = ...
-        handoverProcess(geo_position, squeeze(leo_positions(step, :, 1:3)), groundStation_position, currentLEO_index, c);
+        handoverProcess(squeeze(geo_positions(step, 1, 1:3)), squeeze(leo_positions(step, :, 1:3)), groundStation_position, currentLEO_index, c);
 
     % Optional: Log or display handover events for debugging
     if ~isempty(nextLEO_position)
