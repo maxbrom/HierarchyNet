@@ -190,8 +190,10 @@ function write_sat_array_to_csv(arr, filename)
 end
 
 % Initialize the current LEO index
-currentLEO_index = 0; % Start with the first LEO satellite
-predictedHandoverPoints = []; % To store handover points for visualization
+currentLEO_original = 0; % Start with the first LEO satellite
+currentLEO_kalman = 0; % Start with the first LEO satellite
+predictedHandoverPoints_original = []; % To store handover points for visualization
+predictedHandoverPoints_kalman = []; % To store handover points for visualization
 
 % Constants
 mu = 398600.4418; % Earth's gravitational parameter (km^3/s^2)
@@ -261,9 +263,11 @@ geo_positions = zeros(num_steps, size(geo_satellites, 2), 6);
 leo_velocities = zeros(num_steps, size(leo_satellites, 2), 3);
 
 % Initialize arrays to store data
-ping_history = zeros(num_steps, 1);
+ping_history_original = zeros(num_steps, 1);
+ping_history_kalman = zeros(num_steps, 1);
 time_history = zeros(num_steps, 1);
-leo_connection_history = zeros(num_steps, 1);
+leo_connection_history_original = zeros(num_steps, 1);
+leo_connection_history_kalman = zeros(num_steps, 1);
 
 % Before the simulation loop, create the UI elements
 % Create a 3D Globe inside a uifigure
@@ -304,12 +308,27 @@ for step = 1:num_steps
     end
 
     % Handover process: Determine the next LEO satellite
-    [currentLEO_index, nextLEO_position, predictedHandoverPoints, ping_LEO] = ...
-        handoverProcess(squeeze(geo_positions(step, 1, 1:3)), squeeze(leo_positions(step, :, 1:3)), squeeze(leo_velocities(step, :, :)), user_position, currentLEO_index, c);
-
+    % Original method
+    [currentLEO_original, pos_original, points_original, ping_original] = ...
+        handoverProcess(squeeze(geo_positions(step, 1, 1:3)), ...
+                       squeeze(leo_positions(step, :, 1:3)), ...
+                       squeeze(leo_velocities(step, :, :)), ...
+                       user_position, currentLEO_original, c, false);
+    
+    % Kalman method
+    [currentLEO_kalman, pos_kalman, points_kalman, ping_kalman] = ...
+        handoverProcess(squeeze(geo_positions(step, 1, 1:3)), ...
+                       squeeze(leo_positions(step, :, 1:3)), ...
+                       squeeze(leo_velocities(step, :, :)), ...
+                       user_position, currentLEO_kalman, c, true);
+                    
     % Display timestamp and ping information
-    if isempty(ping_LEO)
-        ping_LEO = inf;
+    if isempty(ping_original)
+        ping_original = inf;
+    end
+
+    if isempty(ping_kalman)
+        ping_kalman = inf;
     end
     
     % Format time as HH:MM:SS
@@ -318,29 +337,51 @@ for step = 1:num_steps
     seconds = current_time - hours * 3600 - minutes * 60;
     timestr = sprintf('%02d:%02d:%02d', hours, minutes, floor(seconds));
     
-    if ping_LEO == inf
+    disp("original")
+    if ping_original == inf
         disp(['Time: ' timestr ' (Step ' num2str(step) ') - No LEO coverage. Ping: inf ms']);
     else
-        disp(['Time: ' timestr ' (Step ' num2str(step) ') - Connected to LEO ' num2str(currentLEO_index) ' with ping: ' num2str(ping_LEO) ' ms']);
+        disp(['Time: ' timestr ' (Step ' num2str(step) ') - Connected to LEO ' num2str(currentLEO_original) ' with ping: ' num2str(ping_original) ' ms']);
+    end
+
+    disp("kalman")
+    if ping_kalman == inf
+        disp(['Time: ' timestr ' (Step ' num2str(step) ') - No LEO coverage. Ping: inf ms']);
+    else
+        disp(['Time: ' timestr ' (Step ' num2str(step) ') - Connected to LEO ' num2str(currentLEO_kalman) ' with ping: ' num2str(ping_kalman) ' ms']);
     end
 
     % Update ping display in UI if it exists
     if exist('pingLabel', 'var') && isvalid(pingLabel)  % Check if pingLabel exists and is valid
-        if ping_LEO == inf
+        if ping_original == inf
             pingLabel.Text = sprintf('Time: %s - No LEO coverage. Ping: inf ms', timestr);
         else
-            pingLabel.Text = sprintf('Time: %s - Connected to LEO %d, Ping: %.2f ms', timestr, currentLEO_index, ping_LEO);
+            pingLabel.Text = sprintf('Time: %s - Connected to LEO %d, Ping: %.2f ms', timestr, currentLEO_original, ping_original);
+        end
+    end
+
+    if exist('pingLabel', 'var') && isvalid(pingLabel)  % Check if pingLabel exists and is valid
+        if ping_kalman == inf
+            pingLabel.Text = sprintf('Time: %s - No LEO coverage. Ping: inf ms', timestr);
+        else
+            pingLabel.Text = sprintf('Time: %s - Connected to LEO %d, Ping: %.2f ms', timestr, currentLEO_kalman, ping_kalman);
         end
     end
 
     % Store data for this timestep
-    ping_history(step) = ping_LEO;
+    ping_history_original(step) = ping_original;
+    ping_history_kalman(step) = ping_kalman;
     time_history(step) = current_time;
-    leo_connection_history(step) = currentLEO_index;
+    leo_connection_history_original(step) = currentLEO_original;
+    leo_connection_history_kalman(step) = currentLEO_kalman;
 end
 
+compare_handover_methods(time_history, ping_history_original, leo_connection_history_original, ping_history_kalman, leo_connection_history_kalman, dt);
+
+save_and_plot_ping_data(time_history, ping_history_original, leo_connection_history_original, dt);
+save_and_plot_ping_data(time_history, ping_history_kalman, leo_connection_history_kalman, dt);
 % Save and plot the data
-save_and_plot_ping_data(time_history, ping_history, leo_connection_history, dt);
+% save_and_plot_ping_data(time_history, ping_history, leo_connection_history, dt);
 
 % colors = hsv(size(leo_positions, 2));
 % for i = 1:size(leo_positions, 2)
@@ -377,3 +418,59 @@ save_and_plot_ping_data(time_history, ping_history, leo_connection_history, dt);
 
 % % This is how to write an array of satellites to a file
 % write_sat_array_to_csv(dummies, "sample_generated_satellite_shell.csv");
+
+function compare_handover_methods(time_history, ping_original, leo_original, ping_kalman, leo_kalman, dt)
+    % Create comparison metrics
+    avg_ping_original = mean(ping_original(ping_original < inf));
+    avg_ping_kalman = mean(ping_kalman(ping_kalman < inf));
+    
+    handovers_original = sum(diff(leo_original) ~= 0);
+    handovers_kalman = sum(diff(leo_kalman) ~= 0);
+    
+    coverage_gaps_original = sum(ping_original == inf);
+    coverage_gaps_kalman = sum(ping_kalman == inf);
+    
+    % Plot comparison
+    figure('Position', [100, 100, 1200, 800]);
+    
+    % Ping comparison subplot
+    subplot(2,1,1);
+    plot(time_history, ping_original, 'b-', 'DisplayName', 'Original Method');
+    hold on;
+    plot(time_history, ping_kalman, 'r--', 'DisplayName', 'Kalman Filter');
+    grid on;
+    xlabel('Time (s)');
+    ylabel('Ping (ms)');
+    title('Ping Comparison');
+    legend('show');
+    
+    % LEO connection subplot
+    subplot(2,1,2);
+    plot(time_history, leo_original, 'b-', 'DisplayName', 'Original Method');
+    hold on;
+    plot(time_history, leo_kalman, 'r--', 'DisplayName', 'Kalman Filter');
+    grid on;
+    xlabel('Time (s)');
+    ylabel('Connected LEO');
+    title('LEO Connection Comparison');
+    legend('show');
+    
+    % Display metrics
+    fprintf('\nComparison Metrics:\n');
+    fprintf('Original Method:\n');
+    fprintf('  Average Ping: %.2f ms\n', avg_ping_original);
+    fprintf('  Number of Handovers: %d\n', handovers_original);
+    fprintf('  Coverage Gaps: %d\n', coverage_gaps_original);
+    
+    fprintf('\nKalman Filter Method:\n');
+    fprintf('  Average Ping: %.2f ms\n', avg_ping_kalman);
+    fprintf('  Number of Handovers: %d\n', handovers_kalman);
+    fprintf('  Coverage Gaps: %d\n', coverage_gaps_kalman);
+    
+    % Save comparison data
+    comparison_data = table(time_history, ping_original, leo_original, ...
+                          ping_kalman, leo_kalman, ...
+                          'VariableNames', {'Time', 'Ping_Original', 'LEO_Original', ...
+                                          'Ping_Kalman', 'LEO_Kalman'});
+    writetable(comparison_data, 'handover_comparison.csv');
+end

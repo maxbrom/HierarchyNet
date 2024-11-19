@@ -1,50 +1,226 @@
-function [currentLEO_index, bestLEO_position, predictedHandoverPoints, ping_LEO] = handoverProcess(GEO_position, LEO_positions, LEO_velocities, user_position, currentLEO_index, c)
-    % Function modified: GEO only collects position data
-    % Velocities and signal strength are communicated directly from LEOs to users
+function [currentLEO_index, bestLEO_position, predictedHandoverPoints, ping_LEO] = handoverProcess(GEO_position, LEO_positions, LEO_velocities, user_position, currentLEO_index, c, use_kalman)
+    % Added parameter use_kalman to switch between methods
+    % use_kalman: boolean to determine whether to use Kalman filtering (true) or original method (false)
     
-    % Step 1: GEO collects only LEO positions
-    disp('GEO satellite collected LEO position data.');
-
-    % Step 2: GEO forwards position data to the ground station
-    distance_to_ground = norm(GEO_position - user_position);
-
-    % disp(['Distance to ground station: ' num2str(distance_to_ground) ' km.']);
-    transmission_time = distance_to_ground / c;
-    disp(['GEO data transmission to ground station: ' num2str(transmission_time) ' seconds.']);
-
-    % Step 3: Ground station receives additional data from LEOs and creates graph
-    LEO_data = collectLEOData(LEO_positions, LEO_velocities);  % New function to collect LEO data
-    G = createUserGraph(LEO_data);
-    bestLEO = UserDecisionMaking(G, user_position, currentLEO_index);
-
-    % Initialize outputs
-    bestLEO_position = [];
-    predictedHandoverPoints = [];
-    ping_LEO = [];
-
-    % Check if we have LEO coverage
-    if bestLEO == 0
-        disp('Warning: Ground station is currently out of coverage from any LEO satellite');
-        currentLEO_index = 0;
-        return;
-    end
-
-    % Update the next LEO position
-    bestLEO_position = LEO_positions(bestLEO, :);
-
-    % Calculate round-trip ping time to the next LEO
-    distance = norm(bestLEO_position - user_position);
-    ping_LEO = 2 * (distance / c) * 1000; % in ms
-
-    % Check if a handover is needed
-    if bestLEO ~= currentLEO_index
-        disp(['Predicted handover to LEO ' num2str(bestLEO) ' with ping: ' num2str(ping_LEO) ' ms.']);
-        
-        % Update current LEO to the next LEO
-        currentLEO_index = bestLEO;
+    if use_kalman
+        [currentLEO_index, bestLEO_position, predictedHandoverPoints, ping_LEO] = kalmanHandoverProcess(GEO_position, LEO_positions, LEO_velocities, user_position, currentLEO_index, c);
     else
-        disp(['Maintaining connection to LEO ' num2str(bestLEO) ' with ping: ' num2str(ping_LEO) ' ms.'])
+        % First determine the best LEO and future handover sequence
+        LEO_data = collectLEOData(LEO_positions, LEO_velocities);
+        G = createUserGraph(LEO_data);
+        bestLEO = UserDecisionMaking(G, user_position, currentLEO_index);
+
+        % Initialize outputs
+        bestLEO_position = [];
+        predictedHandoverPoints = [];
+        ping_LEO = [];
+
+        % Check if we have LEO coverage first
+        if bestLEO == 0
+            disp('Warning: Ground station is currently out of coverage from any LEO satellite');
+            currentLEO_index = 0;
+            ping_LEO = inf;
+            return;
+        end
+
+        % Update the next LEO position
+        bestLEO_position = LEO_positions(bestLEO, :);
+
+        % Calculate system overhead (this is done once for planning multiple handovers)
+        % but doesn't affect individual ping measurements
+        leo_to_geo_delays = zeros(size(LEO_positions, 1), 1);
+        for i = 1:size(LEO_positions, 1)
+            distance_leo_geo = norm(LEO_positions(i,:) - GEO_position);
+            propagation_delay = (distance_leo_geo / c) * 1000; % ms
+            processing_delay = 5; % ms
+            queuing_delay = rand() * 2; % ms
+            leo_to_geo_delays(i) = propagation_delay + processing_delay + queuing_delay;
+        end
+        
+        total_planning_overhead = max(leo_to_geo_delays) + ... % Time for all LEOs to report to GEO
+                                 10 + ...                      % GEO processing time
+                                 (norm(GEO_position - user_position) / c) * 1000 + ... % GEO to ground propagation
+                                 8;                           % Ground station processing
+        
+        % Calculate actual ping to current LEO (this is what the user experiences)
+        distance_to_leo = norm(bestLEO_position - user_position);
+        
+        % Add realistic delays for LEO communication:
+        leo_processing_delay = 5; % Processing delay at LEO (ms)
+        leo_propagation_delay = (distance_to_leo / c) * 1000; % Propagation delay (ms)
+        leo_queuing_delay = rand() * 2; % Random queuing delay 0-2ms
+        transmission_delay = 1; % Transmission delay for packet size (ms)
+        
+        % Calculate round-trip time for current LEO connection
+        leo_round_trip = 2 * (leo_propagation_delay + leo_processing_delay + ...
+                             leo_queuing_delay + transmission_delay);
+        
+        % Add atmospheric effects
+        atmospheric_loss = rand() * 3; % Random atmospheric delay 0-3ms
+        
+        % Add potential interference delay
+        interference_delay = 0;
+        if rand() < 0.1 % 10% chance of interference
+            interference_delay = rand() * 5; % 0-5ms additional delay
+        end
+        
+        % Total ping is just the current LEO connection time
+        ping_LEO = leo_round_trip + atmospheric_loss + interference_delay;
+
+        % Check if a handover is needed
+        if bestLEO ~= currentLEO_index
+            disp(['Predicted handover to LEO ' num2str(bestLEO) ' with ping: ' num2str(ping_LEO) ' ms.']);
+            disp(['Handover planning overhead: ' num2str(total_planning_overhead) ' ms']);
+            currentLEO_index = bestLEO;
+        else
+            disp(['Maintaining connection to LEO ' num2str(bestLEO) ' with ping: ' num2str(ping_LEO) ' ms']);
+        end
     end
+end
+
+function [currentLEO_index, bestLEO_position, predictedHandoverPoints, ping_LEO] = kalmanHandoverProcess(GEO_position, LEO_positions, LEO_velocities, user_position, currentLEO_index, c)
+    % Initialize Kalman Filter parameters
+    persistent kalman_states P_matrices
+    if isempty(kalman_states)
+        kalman_states = initializeKalmanStates(LEO_positions, LEO_velocities);
+        P_matrices = initializeErrorCovariance(size(LEO_positions, 1));
+    end
+    
+    % Process measurement updates
+    for i = 1:size(LEO_positions, 1)
+        [kalman_states(:,i), P_matrices{i}] = updateKalmanFilter(kalman_states(:,i), P_matrices{i}, LEO_positions(i,:), LEO_velocities(i,:));
+    end
+    
+    % Predict future positions
+    prediction_horizon = 10; % seconds
+    predicted_positions = predictSatellitePositions(kalman_states, prediction_horizon);
+    
+    % Make handover decision based on Kalman predictions
+    [bestLEO, bestLEO_position, predictedHandoverPoints] = makeKalmanHandoverDecision(predicted_positions, user_position, currentLEO_index);
+    
+    % Calculate ping if we have a valid connection
+    if bestLEO == 0
+        currentLEO_index = 0;
+        ping_LEO = inf;
+    else
+        currentLEO_index = bestLEO;
+        distance_to_leo = norm(bestLEO_position - user_position);
+        
+        % Add realistic delays for LEO communication:
+        leo_processing_delay = 5; % Processing delay at LEO (ms)
+        leo_propagation_delay = (distance_to_leo / c) * 1000; % Propagation delay (ms)
+        leo_queuing_delay = rand() * 2; % Random queuing delay 0-2ms
+        transmission_delay = 1; % Transmission delay for packet size (ms)
+        
+        % Calculate round-trip time for current LEO connection
+        leo_round_trip = 2 * (leo_propagation_delay + leo_processing_delay + ...
+                             leo_queuing_delay + transmission_delay);
+        
+        % Add atmospheric effects
+        atmospheric_loss = rand() * 3; % Random atmospheric delay 0-3ms
+        
+        % Add potential interference delay
+        interference_delay = 0;
+        if rand() < 0.1 % 10% chance of interference
+            interference_delay = rand() * 5; % 0-5ms additional delay
+        end
+        
+        % Total ping is just the current LEO connection time
+        ping_LEO = leo_round_trip + atmospheric_loss + interference_delay;
+    end
+end
+
+function kalman_states = initializeKalmanStates(positions, velocities)
+    % Initialize state vector for each satellite
+    % State vector: [x, y, z, vx, vy, vz]'
+    num_satellites = size(positions, 1);
+    kalman_states = zeros(6, num_satellites);
+    
+    for i = 1:num_satellites
+        kalman_states(:,i) = [positions(i,:)'; velocities(i,:)'];
+    end
+end
+
+
+function P_matrices = initializeErrorCovariance(num_satellites)
+    % Initialize error covariance matrices
+    P_matrices = cell(1, num_satellites);
+    for i = 1:num_satellites
+        P_matrices{i} = eye(6) * 1000; % Initial uncertainty
+    end
+end
+
+function [updated_state, updated_P] = updateKalmanFilter(state, P, position_measurement, velocity_measurement)
+    % System matrices
+    dt = 0.1; % Time step
+    F = [1 0 0 dt 0 0;
+         0 1 0 0 dt 0;
+         0 0 1 0 0 dt;
+         0 0 0 1 0 0;
+         0 0 0 0 1 0;
+         0 0 0 0 0 1];
+    
+    H = eye(6); % Measurement matrix
+    
+    % Process and measurement noise
+    Q = eye(6) * 0.1;
+    R = eye(6) * 1;
+    
+    % Prediction step
+    predicted_state = F * state;
+    predicted_P = F * P * F' + Q;
+    
+    % Measurement
+    measurement = [position_measurement'; velocity_measurement'];
+    
+    % Update step
+    K = predicted_P * H' / (H * predicted_P * H' + R);
+    updated_state = predicted_state + K * (measurement - H * predicted_state);
+    updated_P = (eye(6) - K * H) * predicted_P;
+end
+
+function predicted_positions = predictSatellitePositions(kalman_states, horizon)
+    num_satellites = size(kalman_states, 2);
+    num_steps = ceil(horizon / 0.1);
+    predicted_positions = zeros(num_satellites, 3, num_steps);
+    
+    for i = 1:num_satellites
+        state = kalman_states(:,i);
+        for j = 1:num_steps
+            t = j * 0.1;
+            pos = state(1:3) + state(4:6) * t;
+            predicted_positions(i,:,j) = pos';
+        end
+    end
+end
+
+function [bestLEO, bestLEO_position, predictedHandoverPoints] = makeKalmanHandoverDecision(predicted_positions, user_position, currentLEO)
+    num_satellites = size(predicted_positions, 1);
+    num_predictions = size(predicted_positions, 3);
+    
+    % Calculate coverage scores for each satellite over the prediction horizon
+    coverage_scores = zeros(1, num_satellites);
+    for i = 1:num_satellites
+        score = 0;
+        for j = 1:num_predictions
+            pos = squeeze(predicted_positions(i,:,j));
+            distance = norm(pos - user_position);
+            score = score + 1/distance;
+        end
+        coverage_scores(i) = score;
+    end
+    
+    % Add hysteresis for current connection
+    if currentLEO > 0
+        coverage_scores(currentLEO) = coverage_scores(currentLEO) * 1.1;
+    end
+    
+    % Find best satellite
+    [~, bestLEO] = max(coverage_scores);
+    bestLEO_position = squeeze(predicted_positions(bestLEO,:,1))';
+    
+    % Store handover points for visualization
+    predictedHandoverPoints = squeeze(predicted_positions(bestLEO,:,:))';
 end
 
 function LEO_data = collectLEOData(LEO_positions, LEO_velocities)
