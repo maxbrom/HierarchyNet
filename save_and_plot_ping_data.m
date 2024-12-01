@@ -1,4 +1,4 @@
-function save_and_plot_ping_data(time_history, ping_history, leo_connection_history, dt)
+function save_and_plot_ping_data(time_history, ping_history, leo_connection_history, dt, method)
     % Replace inf values with a high but plottable value (200 ms)
     MAX_PING_VALUE = 200;  
     ping_history_plot = ping_history;
@@ -40,7 +40,7 @@ function save_and_plot_ping_data(time_history, ping_history, leo_connection_hist
     xlabel('Time (seconds)');
     ylabel('Ping (ms)');
     yscale('log');
-    title('Satellite Connection Ping History');
+    title(['Satellite Connection Ping History of ' method ' Method']);
     legend('show', 'Location', 'eastoutside');
     
     % Add time markers on x-axis
@@ -66,6 +66,6 @@ function save_and_plot_ping_data(time_history, ping_history, leo_connection_hist
     end
     
     % Save the plot
-    saveas(gcf, 'ping_history_plot.png');
-    saveas(gcf, 'ping_history_plot.fig');
+    saveas(gcf, ['ping_history_plot_' method '.png']);
+    saveas(gcf, ['ping_history_plot_' method '.fig']);
 end 

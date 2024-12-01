@@ -192,9 +192,12 @@ end
 % Initialize the current LEO index
 currentLEO_original = 0; % Start with the first LEO satellite
 currentLEO_kalman = 0; % Start with the first LEO satellite
+currentLEO_hmm = 0; % Start with the first LEO satellite
+currentLEO_keplerian = 0; % Start with the first LEO satellite
 predictedHandoverPoints_original = []; % To store handover points for visualization
 predictedHandoverPoints_kalman = []; % To store handover points for visualization
-
+predictedHandoverPoints_hmm = []; % To store handover points for visualization
+predictedHandoverPoints_keplerian = []; % To store handover points for visualization
 % Constants
 mu = 398600.4418; % Earth's gravitational parameter (km^3/s^2)
 R_earth = 6371; % Earth's radius in km
@@ -265,10 +268,13 @@ leo_velocities = zeros(num_steps, size(leo_satellites, 2), 3);
 % Initialize arrays to store data
 ping_history_original = zeros(num_steps, 1);
 ping_history_kalman = zeros(num_steps, 1);
+ping_history_hmm = zeros(num_steps, 1);
+ping_history_keplerian = zeros(num_steps, 1);
 time_history = zeros(num_steps, 1);
 leo_connection_history_original = zeros(num_steps, 1);
 leo_connection_history_kalman = zeros(num_steps, 1);
-
+leo_connection_history_hmm = zeros(num_steps, 1);
+leo_connection_history_keplerian = zeros(num_steps, 1);
 % Before the simulation loop, create the UI elements
 % Create a 3D Globe inside a uifigure
 % uif = uifigure;           % Create a UI figure for the globe
@@ -313,14 +319,28 @@ for step = 1:num_steps
         handoverProcess(squeeze(geo_positions(step, 1, 1:3)), ...
                        squeeze(leo_positions(step, :, 1:3)), ...
                        squeeze(leo_velocities(step, :, :)), ...
-                       user_position, currentLEO_original, c, false);
+                       user_position, currentLEO_original, c, 'original');
     
     % Kalman method
     [currentLEO_kalman, pos_kalman, points_kalman, ping_kalman] = ...
+    handoverProcess(squeeze(geo_positions(step, 1, 1:3)), ...
+                    squeeze(leo_positions(step, :, 1:3)), ...
+                    squeeze(leo_velocities(step, :, :)), ...
+                    user_position, currentLEO_kalman, c, 'kalman');
+
+    % HMM method
+    [currentLEO_hmm, pos_hmm, points_hmm, ping_hmm] = ...
         handoverProcess(squeeze(geo_positions(step, 1, 1:3)), ...
                        squeeze(leo_positions(step, :, 1:3)), ...
                        squeeze(leo_velocities(step, :, :)), ...
-                       user_position, currentLEO_kalman, c, true);
+                       user_position, currentLEO_hmm, c, 'hmm');
+
+    % SVM method
+    [currentLEO_keplerian, pos_keplerian, points_keplerian, ping_keplerian] = ...
+        handoverProcess(squeeze(geo_positions(step, 1, 1:3)), ...
+                       squeeze(leo_positions(step, :, 1:3)), ...
+                       squeeze(leo_velocities(step, :, :)), ...
+                       user_position, currentLEO_keplerian, c, 'keplerian');
                     
     % Display timestamp and ping information
     if isempty(ping_original)
@@ -329,6 +349,10 @@ for step = 1:num_steps
 
     if isempty(ping_kalman)
         ping_kalman = inf;
+    end
+
+    if isempty(ping_hmm)
+        ping_hmm = inf;
     end
     
     % Format time as HH:MM:SS
@@ -351,6 +375,20 @@ for step = 1:num_steps
         disp(['Time: ' timestr ' (Step ' num2str(step) ') - Connected to LEO ' num2str(currentLEO_kalman) ' with ping: ' num2str(ping_kalman) ' ms']);
     end
 
+    disp("hmm")
+    if ping_hmm == inf
+        disp(['Time: ' timestr ' (Step ' num2str(step) ') - No LEO coverage. Ping: inf ms']);
+    else
+        disp(['Time: ' timestr ' (Step ' num2str(step) ') - Connected to LEO ' num2str(currentLEO_hmm) ' with ping: ' num2str(ping_hmm) ' ms']);
+    end
+
+    disp("keplerian")
+    if ping_keplerian == inf
+        disp(['Time: ' timestr ' (Step ' num2str(step) ') - No LEO coverage. Ping: inf ms']);
+    else
+        disp(['Time: ' timestr ' (Step ' num2str(step) ') - Connected to LEO ' num2str(currentLEO_keplerian) ' with ping: ' num2str(ping_keplerian) ' ms']);
+    end
+
     % Update ping display in UI if it exists
     if exist('pingLabel', 'var') && isvalid(pingLabel)  % Check if pingLabel exists and is valid
         if ping_original == inf
@@ -371,106 +409,25 @@ for step = 1:num_steps
     % Store data for this timestep
     ping_history_original(step) = ping_original;
     ping_history_kalman(step) = ping_kalman;
+    ping_history_hmm(step) = ping_hmm;
+    ping_history_keplerian(step) = ping_keplerian;
     time_history(step) = current_time;
     leo_connection_history_original(step) = currentLEO_original;
     leo_connection_history_kalman(step) = currentLEO_kalman;
+    leo_connection_history_hmm(step) = currentLEO_hmm;
+    leo_connection_history_keplerian(step) = currentLEO_keplerian;
 end
 
-compare_handover_methods(time_history, ping_history_original, leo_connection_history_original, ping_history_kalman, leo_connection_history_kalman, dt);
+% Update the comparison function call to include HMM
+compare_handover_methods(time_history, ...
+                        ping_history_original, leo_connection_history_original, ...
+                        ping_history_kalman, leo_connection_history_kalman, ...
+                        ping_history_hmm, leo_connection_history_hmm, ...
+                        ping_history_keplerian, leo_connection_history_keplerian, ...
+                        dt);
 
-save_and_plot_ping_data(time_history, ping_history_original, leo_connection_history_original, dt);
-save_and_plot_ping_data(time_history, ping_history_kalman, leo_connection_history_kalman, dt);
-% Save and plot the data
-% save_and_plot_ping_data(time_history, ping_history, leo_connection_history, dt);
-
-% colors = hsv(size(leo_positions, 2));
-% for i = 1:size(leo_positions, 2)
-%     lat = rad2deg(leo_positions(:, i, 4));
-%     lon = rad2deg(leo_positions(:, i, 5));
-%     alt = leo_positions(:, i, 6);
-%     geoplot3(g, lat, lon, alt, 'LineWidth', 2, 'Color', colors(i,:));
-% end
-
-% colors = hsv(size(geo_positions,2));
-% for i = 1:size(geo_positions, 2)
-%     lat = rad2deg(geo_positions(:, i, 4));
-%     lon = rad2deg(geo_positions(:, i, 5));
-%     alt = geo_positions(:, i, 6);
-%     geoplot3(g, lat, lon, alt, 'LineWidth', 2, 'Color', colors(i,:));
-% end
-
-% % This is how to save the locations to a csv file
-% writematrix(leo_positions, 'sample_satellite_location_output.csv')
-% writematrix(geo_positions, 'sample_satellite_location_output.csv', 'WriteMode', 'append');
-
-% Plot the predicted handover points on the geoglobe
-% if ~isempty(predictedHandoverPoints)
-%     handover_lats = rad2deg(predictedHandoverPoints(:, 2));
-%     handover_lons = rad2deg(predictedHandoverPoints(:, 3));
-%     handover_alts = predictedHandoverPoints(:, 4);
-%     geoplot3(g, handover_lats, handover_lons, handover_alts, 'Marker', 'o', 'MarkerSize', 5, 'Color', 'green');
-% end
-
-% % This is how to generate a dummy shell with evenly spaced satellites
-% dummy = leo_satellites(i);
-% dummy.name = "EastLansing";
-% dummies = generate_even_spaced_shell(dummy, 100, 10);
-
-% % This is how to write an array of satellites to a file
-% write_sat_array_to_csv(dummies, "sample_generated_satellite_shell.csv");
-
-function compare_handover_methods(time_history, ping_original, leo_original, ping_kalman, leo_kalman, dt)
-    % Create comparison metrics
-    avg_ping_original = mean(ping_original(ping_original < inf));
-    avg_ping_kalman = mean(ping_kalman(ping_kalman < inf));
-    
-    handovers_original = sum(diff(leo_original) ~= 0);
-    handovers_kalman = sum(diff(leo_kalman) ~= 0);
-    
-    coverage_gaps_original = sum(ping_original == inf);
-    coverage_gaps_kalman = sum(ping_kalman == inf);
-    
-    % Plot comparison
-    figure('Position', [100, 100, 1200, 800]);
-    
-    % Ping comparison subplot
-    subplot(2,1,1);
-    plot(time_history, ping_original, 'b-', 'DisplayName', 'Original Method');
-    hold on;
-    plot(time_history, ping_kalman, 'r--', 'DisplayName', 'Kalman Filter');
-    grid on;
-    xlabel('Time (s)');
-    ylabel('Ping (ms)');
-    title('Ping Comparison');
-    legend('show');
-    
-    % LEO connection subplot
-    subplot(2,1,2);
-    plot(time_history, leo_original, 'b-', 'DisplayName', 'Original Method');
-    hold on;
-    plot(time_history, leo_kalman, 'r--', 'DisplayName', 'Kalman Filter');
-    grid on;
-    xlabel('Time (s)');
-    ylabel('Connected LEO');
-    title('LEO Connection Comparison');
-    legend('show');
-    
-    % Display metrics
-    fprintf('\nComparison Metrics:\n');
-    fprintf('Original Method:\n');
-    fprintf('  Average Ping: %.2f ms\n', avg_ping_original);
-    fprintf('  Number of Handovers: %d\n', handovers_original);
-    fprintf('  Coverage Gaps: %d\n', coverage_gaps_original);
-    
-    fprintf('\nKalman Filter Method:\n');
-    fprintf('  Average Ping: %.2f ms\n', avg_ping_kalman);
-    fprintf('  Number of Handovers: %d\n', handovers_kalman);
-    fprintf('  Coverage Gaps: %d\n', coverage_gaps_kalman);
-    
-    % Save comparison data
-    comparison_data = table(time_history, ping_original, leo_original, ...
-                          ping_kalman, leo_kalman, ...
-                          'VariableNames', {'Time', 'Ping_Original', 'LEO_Original', ...
-                                          'Ping_Kalman', 'LEO_Kalman'});
-    writetable(comparison_data, 'handover_comparison.csv');
-end
+% Save and plot data for each method
+save_and_plot_ping_data(time_history, ping_history_original, leo_connection_history_original, dt, 'original');
+save_and_plot_ping_data(time_history, ping_history_kalman, leo_connection_history_kalman, dt, 'kalman');
+save_and_plot_ping_data(time_history, ping_history_hmm, leo_connection_history_hmm, dt, 'hmm');
+save_and_plot_ping_data(time_history, ping_history_keplerian, leo_connection_history_keplerian, dt, 'keplerian');
