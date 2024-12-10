@@ -1,1 +1,7 @@
 # HierarchyNet
+
+This repository contains a simulator for a hierarchical satellite constellation involving LEO and GEO satellites. The data that is used in the generation of the figures consists of 340 LEO satellites and 1 GEO satellite. The main script for simulation is `sat_sim_script.m`. The code directly in that file deals with generating satellite configurations and calculating the physical positions of the satellites after certain time periods within their orbits.
+
+The code block used to generate the satellite shells is in the commented out block on line 250 of `sat_sim_script.m`. This generates shells of satellites based on given LEO satellite configurations. If this block were to be uncommented as it is, it would generate shells based upon an already generated set of shells, however, when it was originally used it was based on the satellites in `sample_satellite_params.csv`. If the input file in line 216 of `sat_sim_script.m` were replaced with that file, the correct satellite shells would be generated and saved in `multiple_shells_params_doubled.csv`. 
+
+After the generation of these satellite shells we load their information into the HierarchySatellite class and perform the simulation with those objects. Given that these files have already been generated, to reproduce our results would only require the user to run the `sat_sim_script.m` file in MATLAB.

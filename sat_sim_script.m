@@ -259,8 +259,6 @@ end
 % generated_sats(end + 1) = geo_satellites(1);
 % write_sat_array_to_csv(generated_sats, "multiple_shells_params_doubled.csv");
 
-% disp("written")
-
 leo_positions = zeros(num_steps, size(leo_satellites, 2), 6);
 geo_positions = zeros(num_steps, size(geo_satellites, 2), 6);
 leo_velocities = zeros(num_steps, size(leo_satellites, 2), 3);
